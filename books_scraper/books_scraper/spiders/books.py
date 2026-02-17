@@ -2,6 +2,8 @@ import scrapy
 from scrapy.http import Response
 from typing import Any, Generator
 
+from books_scraper.items import BooksScraperItem
+
 
 class BooksSpider(scrapy.Spider):
     name = "books"
@@ -17,13 +19,12 @@ class BooksSpider(scrapy.Spider):
     }
 
     def parse(
-            self,
-            response: Response,
-            **kwargs
+        self, response: Response, **kwargs
     ) -> Generator[Any, None, None]:
         book_links = response.css(
             "article.product_pod h3 a::attr(href)"
         ).getall()
+
         for link in book_links:
             yield response.follow(link, callback=self.parse_book)
 
@@ -32,36 +33,54 @@ class BooksSpider(scrapy.Spider):
             yield response.follow(next_page, callback=self.parse)
 
     def parse_book(
-            self,
-            response: Response, **kwargs
+        self, response: Response, **kwargs
     ) -> Generator[Any, None, None]:
+        item = BooksScraperItem()
 
-        title = response.css(".product_main h1::text").get()
-        price_text = response.css(".price_color::text").re_first(r"\d+\.\d+")
-        stock_text = response.css(".availability::text").re_first(r"\d+")
-        rating_class = response.css(".star-rating::attr(class)").get()
+        item["title"] = response.css(
+            ".product_main h1::text"
+        ).get()
+
+        price_text = response.css(
+            ".price_color::text"
+        ).re_first(r"\d+\.\d+")
+
+        stock_text = response.css(
+            ".availability::text"
+        ).re_first(r"\d+")
+
+        rating_class = response.css(
+            ".star-rating::attr(class)"
+        ).get()
+
         rating_word = (
             rating_class.replace("star-rating ", "")
             if rating_class
             else None
         )
-        rating = self.rating_map.get(rating_word)
-        category = response.xpath(
+
+        item["price"] = float(price_text) if price_text else 0.0
+        item["amount_in_stock"] = (
+            int(stock_text) if stock_text else 0
+        )
+        item["rating"] = self.rating_map.get(rating_word, 0)
+
+        item["category"] = response.xpath(
             "//ul[@class='breadcrumb']/li[last()-1]/a/text()"
-        ).get()
-        description = response.css("#product_description ~ p::text").get()
-        upc = response.xpath(
-            "//th[text()='UPC']/following-sibling::td/text()"
+        ).get() or ""
+
+        description = response.css(
+            "#product_description ~ p::text"
         ).get()
 
-        yield {
-            "title": title,
-            "price": float(price_text) if price_text else 0.0,
-            "amount_in_stock": int(stock_text) if stock_text else 0,
-            "rating": rating or 0,
-            "category": category or "",
-            "description": description.replace("...more", "").strip()
+        item["description"] = (
+            description.replace("...more", "").strip()
             if description
-            else "",
-            "upc": upc or "",
-        }
+            else ""
+        )
+
+        item["upc"] = response.xpath(
+            "//th[text()='UPC']/following-sibling::td/text()"
+        ).get() or ""
+
+        yield item
